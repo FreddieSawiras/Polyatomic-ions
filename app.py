@@ -9,7 +9,6 @@ st.set_page_config(page_title="Polyatomic Ion Quiz", layout="centered")
 # ---------------------------------------------------------------------------
 IONS = [
     ("NH_4", "ammonium", "+1"),
-    ("H_3O", "hydronium", "+1"),
     ("CN", "cyanide", "-1"),
     ("OH", "hydroxide", "-1"),
     ("ClO", "hypochlorite", "-1"),
@@ -118,6 +117,10 @@ if "flash_pos" not in st.session_state:
     st.session_state.flash_pos = 0
 if "flash_flipped" not in st.session_state:
     st.session_state.flash_flipped = False
+if "flash_direction" not in st.session_state:
+    st.session_state.flash_direction = "formula_front"  # "formula_front", "name_front", or "mixed"
+if "flash_card_sides" not in st.session_state:
+    st.session_state.flash_card_sides = {}  # idx -> "formula_front"/"name_front", set when mixed mode deals a card
 if "known" not in st.session_state:
     st.session_state.known = set()      # indices into IONS the user marked "I know this"
 if "learning" not in st.session_state:
@@ -148,6 +151,22 @@ def shuffle_flashcards(pool_indices=None):
     st.session_state.flash_order = pool
     st.session_state.flash_pos = 0
     st.session_state.flash_flipped = False
+    if st.session_state.flash_direction == "mixed":
+        st.session_state.flash_card_sides = {
+            i: random.choice(["formula_front", "name_front"]) for i in pool
+        }
+    else:
+        st.session_state.flash_card_sides = {}
+
+
+def side_for_card(idx: int) -> str:
+    """Which side is shown first for this card, respecting the current mode."""
+    if st.session_state.flash_direction == "mixed":
+        # deal one lazily if this card hasn't been assigned a side yet
+        if idx not in st.session_state.flash_card_sides:
+            st.session_state.flash_card_sides[idx] = random.choice(["formula_front", "name_front"])
+        return st.session_state.flash_card_sides[idx]
+    return st.session_state.flash_direction
 
 
 def next_card(step=1):
@@ -173,6 +192,29 @@ if page == "🧠 Study Mode":
 
     # ---------------- Flashcards ----------------
     with tab_cards:
+        direction_label = st.radio(
+            "What should the front of the card show?",
+            [
+                "Show formula → recall name + charge",
+                "Show name → recall formula + charge",
+                "Mixed → randomly formula or name each card",
+            ],
+            horizontal=False,
+        )
+        new_direction = (
+            "formula_front" if direction_label.startswith("Show formula")
+            else "name_front" if direction_label.startswith("Show name")
+            else "mixed"
+        )
+        if new_direction != st.session_state.flash_direction:
+            st.session_state.flash_direction = new_direction
+            # re-deal sides for the current deck so mixed mode kicks in right away
+            if new_direction == "mixed":
+                st.session_state.flash_card_sides = {
+                    i: random.choice(["formula_front", "name_front"]) for i in st.session_state.flash_order
+                }
+            st.session_state.flash_flipped = False
+
         colA, colB, colC = st.columns(3)
         if colA.button("🔀 Shuffle all", use_container_width=True):
             shuffle_flashcards()
@@ -208,13 +250,23 @@ if page == "🧠 Study Mode":
             "background-color:rgba(74,144,217,0.07);"
         )
         if not st.session_state.flash_flipped:
-            front_html = f"<div style='{card_style}'>{format_formula(formula)}</div>"
+            if side_for_card(idx) == "formula_front":
+                front_text = format_formula(formula)
+                prompt = "Tap **Flip** to see the name and charge."
+            else:
+                front_text = name
+                prompt = "Tap **Flip** to see the formula and charge."
+            front_html = f"<div style='{card_style}'>{front_text}</div>"
             st.markdown(front_html, unsafe_allow_html=True)
-            st.caption("Tap **Flip** to see the name and charge.")
+            st.caption(prompt)
         else:
+            if side_for_card(idx) == "formula_front":
+                back_main = name
+            else:
+                back_main = format_formula(formula)
             back_html = (
                 f"<div style='{card_style}'>"
-                f"{name}<br><span style='font-size:20px; opacity:0.75;'>charge: {charge}</span>"
+                f"{back_main}<br><span style='font-size:20px; opacity:0.75;'>charge: {charge}</span>"
                 f"</div>"
             )
             st.markdown(back_html, unsafe_allow_html=True)
